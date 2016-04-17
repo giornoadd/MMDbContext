@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Mimo.Dbcontext.DataTransferObjects;
 using Mimo.Dbcontext.DataTransferObjects.Mapper;
 using System.Data;
 using System.Reflection;

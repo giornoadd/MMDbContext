@@ -7,13 +7,23 @@ using System.Data.Common;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Threading.Tasks;
-using Dapper;
 
 namespace Mimo.Dbcontext.DatabaseContext
 {
 
     public partial class MssqlContext : BaseDBContext
     {
+
+        #region IDisposable Members
+
+        public override void Dispose()
+        {
+            this.databaseSqlConnection.Dispose();
+            this.databaseSqlConnection = null;
+            this.connectionString = null;
+        }
+
+        #endregion
 
         public String connectionString;
 
@@ -45,44 +55,6 @@ namespace Mimo.Dbcontext.DatabaseContext
             this.databaseSqlConnection = sqlClient;
         }
 
-        public DataSet SelectDataSet(IDbCommand dbCommand)
-        {
-            return this.Fill(dbCommand);
-        }
-
-        protected DataSet Fill(IDbCommand dbCommand)
-        {
-
-            try
-            {
-                //Create a SqlDataAdapter for the Suppliers table.
-                SqlDataAdapter adapter = new SqlDataAdapter();
-
-                // Create a SqlCommand to retrieve Suppliers data.
-                SqlCommand command = dbCommand as SqlCommand;
-
-                if (command.Connection.State != ConnectionState.Open)
-                {
-                    OpenConnection(command.Connection);
-                }
-
-                // Set the SqlDataAdapter's SelectCommand.
-                adapter.SelectCommand = command;
-
-                // Fill the DataSet.
-                DataSet dataSet = new DataSet();
-                adapter.Fill(dataSet);
-
-                return dataSet;
-            }
-            finally
-            {
-                CloseConnection(dbCommand.Connection);
-            }
-
-
-        }
-
         #region "Database Helper Methods"
         // GetDbSqlCommand
         public override IDbCommand GetSqlCommand(string sqlQuery)
@@ -93,7 +65,6 @@ namespace Mimo.Dbcontext.DatabaseContext
             command.CommandText = sqlQuery;
             return command;
         }
-
 
         // GetDbSprocCommand
         public override IDbCommand GetSprocCommand(string sprocName)
@@ -369,10 +340,6 @@ namespace Mimo.Dbcontext.DatabaseContext
             }
         }
 
-
-
-
-
         private void CloseConnection(IDbConnection sqlConnection)
         {
             try
@@ -414,24 +381,6 @@ namespace Mimo.Dbcontext.DatabaseContext
             }
         }
 
-
-        public override Int32 ExecuteNonQuery(string sqlCommand, object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                return sqlConnection.Execute(sqlCommand, parameter);
-            }
-        }
-
-        public override async Task<Int32> ExecuteNonQueryAsync(string sqlCommand, object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                return await sqlConnection.ExecuteAsync(sqlCommand, parameter);
-            }
-        }
-
-
         // ExecuteScalar
         public override Object ExecuteScalar(IDbCommand command)
         {
@@ -458,22 +407,6 @@ namespace Mimo.Dbcontext.DatabaseContext
             finally
             {
                 CloseConnection(command.Connection);
-            }
-        }
-
-        public override Object ExecuteScalar(string sqlCommand, object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                return  sqlConnection.ExecuteScalar(sqlCommand, parameter);
-            }
-        }
-
-        public override async Task<Object> ExecuteScalarAsync(string sqlCommand, object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                return await sqlConnection.ExecuteScalarAsync(sqlCommand, parameter);
             }
         }
 
@@ -686,7 +619,7 @@ namespace Mimo.Dbcontext.DatabaseContext
                 if (reader.HasRows)
                 {
                     reader.Read();
-                    IDataTransferObject<T> mapper = new DataMapperFactory().GetMapper<T>();
+                    IDataTransferObject<T> mapper = DataMapperFactory.GetMapper<T>();
                     modelObj = mapper.EntityMapping(reader);
                     reader.Close();
                 }
@@ -710,21 +643,7 @@ namespace Mimo.Dbcontext.DatabaseContext
             // return the MODEL, it's either populated with data or null.
             return modelObj;
         }
-        public override T GetSingle<T>(String sqlCommand, Object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                return sqlConnection.Query<T>(sqlCommand, parameter).FirstOrDefault();
-            }
-        }
-        public override async Task<T> GetSingleAsync<T>(string sqlCommand, object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                var resultList = await sqlConnection.QueryAsync<T>(sqlCommand, parameter);
-                return resultList.FirstOrDefault();
-            }
-        }
+
         // GetList
         public override List<T> GetList<T>(IDbCommand command)
         {
@@ -737,7 +656,7 @@ namespace Mimo.Dbcontext.DatabaseContext
                 var reader = command.ExecuteReader() as SqlDataReader;
                 if (reader.HasRows)
                 {
-                    IDataTransferObject<T> mapper = new DataMapperFactory().GetMapper<T>();
+                    IDataTransferObject<T> mapper = DataMapperFactory.GetMapper<T>();
                     modelObjList = mapper.GetList(reader).ToList<T>();
                     reader.Close();
                 }
@@ -763,41 +682,352 @@ namespace Mimo.Dbcontext.DatabaseContext
             return modelObjList;
         }
 
-        public override List<T> GetList<T>(String sqlCommand, Object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                return sqlConnection.Query<T>(sqlCommand, parameter).ToList();
-            }
-        }
-        public override async Task<IEnumerable<T>> GetListAsync<T>(string sqlCommand, object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
-            {
-                return await sqlConnection.QueryAsync<T>(sqlCommand, parameter);
-            }
-        }
-
-
         #endregion
 
-        #region IDisposable Members
 
-        public override void Dispose()
+        #region Async Command
+
+
+        // ExecuteNonQuery
+        public override async Task<Int32> ExecuteNonQueryAsync(IDbCommand command)
         {
-            this.databaseSqlConnection.Dispose();
-            this.databaseSqlConnection = null;
-            this.connectionString = null;
-        }
-
-        #endregion
-
-        public override int GetSingleInt32(string sqlCommand, object parameter)
-        {
-            using (var sqlConnection = new SqlConnection(connectionString))
+            try
             {
-                return sqlConnection.Query<int>(sqlCommand, parameter).FirstOrDefault();
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                return await cmd.ExecuteNonQueryAsync();
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                Console.WriteLine(e.StackTrace);
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
             }
         }
+
+        // ExecuteScalar
+        public override async Task<Object> ExecuteScalarAsync(IDbCommand command)
+        {
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                return await cmd.ExecuteScalarAsync();
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+        }
+
+        // GetSingleValue
+        public override async Task<T> GetSingleValueAsync<T>(IDbCommand command)
+        {
+            T returnValue = default(T);
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                var reader = await cmd.ExecuteReaderAsync();
+
+                if (reader.HasRows)
+                {
+                    reader.Read();
+                    if (!reader.IsDBNull(0)) { returnValue = (T)reader[0]; }
+                    reader.Close();
+                }
+                return returnValue;
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+        }
+
+
+        // GetSingleString
+        public override async Task<Int32> GetSingleInt32Async(IDbCommand command)
+        {
+            Int32 returnValue = default(int);
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                var reader = await cmd.ExecuteReaderAsync();
+
+                if (reader.HasRows)
+                {
+                    reader.Read();
+                    if (!reader.IsDBNull(0)) { returnValue = reader.GetInt32(0); }
+                    reader.Close();
+                }
+                return returnValue;
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+        }
+
+
+        // GetSingleString
+        public override async Task<String> GetSingleStringAsync(IDbCommand command)
+        {
+            string returnValue = null;
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                var reader = await cmd.ExecuteReaderAsync();
+                if (reader.HasRows)
+                {
+                    reader.Read();
+                    if (!reader.IsDBNull(0)) { returnValue = reader.GetString(0); }
+                    reader.Close();
+                }
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+            return returnValue;
+        }
+
+
+        // GetStringList
+        public override async Task<List<String>> GetStringListAsync(IDbCommand command)
+        {
+            List<String> returnList = null;
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                var reader = await cmd.ExecuteReaderAsync();
+
+                if (reader.HasRows)
+                {
+                    returnList = new List<String>();
+                    while (reader.Read())
+                    {
+                        if (!reader.IsDBNull(0)) { returnList.Add(reader.GetString(0)); }
+                    }
+                    reader.Close();
+                }
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+            return returnList;
+        }
+
+
+        // GetInt32List
+        public override async Task<List<int>> GetInt32ListAsync(IDbCommand command)
+        {
+            List<int> returnList = null;
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                var reader = await cmd.ExecuteReaderAsync();
+                if (reader.HasRows)
+                {
+                    returnList = new List<int>();
+                    while (reader.Read())
+                    {
+                        if (!reader.IsDBNull(0)) { returnList.Add(reader.GetInt32(0)); }
+                    }
+                    reader.Close();
+                }
+                return returnList;
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+        }
+
+        // GetSingle
+        public override async Task<T> GetSingleAsync<T>(IDbCommand command)
+        {
+            T modelObj = default(T);
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                {
+                    OpenConnection(command.Connection);
+                }
+                var cmd = command as SqlCommand;
+                var reader = await cmd.ExecuteReaderAsync();
+                if (reader.HasRows)
+                {
+                    reader.Read();
+                    IDataTransferObject<T> mapper = DataMapperFactory.GetMapper<T>();
+                    modelObj = mapper.EntityMapping(reader);
+                    reader.Close();
+                }
+                // return the MODEL, it's either populated with data or null.
+                return modelObj;
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+        }
+
+        // GetList
+        public override async Task<List<T>> GetListAsync<T>(IDbCommand command)
+        {
+            List<T> modelObjList = new List<T>();
+            try
+            {
+                if (command.Connection.State != ConnectionState.Open)
+                    OpenConnection(command.Connection);
+
+                var cmd = command as SqlCommand;
+                var reader = await cmd.ExecuteReaderAsync();
+                if (reader.HasRows)
+                {
+                    IDataTransferObject<T> mapper = DataMapperFactory.GetMapper<T>();
+                    modelObjList = mapper.GetList(reader).ToList<T>();
+                    reader.Close();
+                }
+                // We return either the populated list if there was data,
+                // or if there was no data we return an empty list.
+                return modelObjList;
+            }
+            catch (DatabaseException dbExp)
+            {
+                throw dbExp;
+            }
+            catch (SqlException sqlExp)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.EXECUTE_ERROR, "Error executing query", sqlExp);
+            }
+            catch (Exception e)
+            {
+                throw new DatabaseException(DatabaseException.ErrorCode.UNKNOWN, "Error executing query", e);
+            }
+            finally
+            {
+                CloseConnection(command.Connection);
+            }
+        }
+        #endregion
+
     }
 }
